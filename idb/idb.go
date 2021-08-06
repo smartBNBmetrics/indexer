@@ -12,10 +12,11 @@ import (
 	"strings"
 	"time"
 
-	sdk_types "github.com/algorand/go-algorand-sdk/types"
+	"github.com/algorand/go-algorand/data/basics"
+	"github.com/algorand/go-algorand/data/bookkeeping"
+	"github.com/algorand/go-algorand/data/transactions"
 
 	models "github.com/algorand/indexer/api/generated/v2"
-	"github.com/algorand/indexer/types"
 	"github.com/algorand/indexer/util"
 )
 
@@ -80,23 +81,23 @@ var ErrorNotInitialized error = errors.New("accounting not initialized")
 type IndexerDb interface {
 	// The next few functions define the import interface, functions for loading data into the database. StartBlock() through Get/SetImportState().
 	StartBlock() error
-	AddTransaction(round uint64, intra int, txtypeenum int, assetid uint64, txn types.SignedTxnWithAD, participation [][]byte) error
+	AddTransaction(round uint64, intra int, txtypeenum int, assetid uint64, txn transactions.SignedTxnWithAD, participation [][]byte) error
 	CommitBlock(round uint64, timestamp int64, rewardslevel uint64, headerbytes []byte) error
 
-	LoadGenesis(genesis types.Genesis) (err error)
+	LoadGenesis(genesis bookkeeping.Genesis) (err error)
 
 	// GetNextRoundToAccount returns ErrorNotInitialized if genesis is not loaded.
 	GetNextRoundToAccount() (uint64, error)
 	GetNextRoundToLoad() (uint64, error)
-	GetSpecialAccounts() (SpecialAccounts, error)
+	GetSpecialAccounts() (transactions.SpecialAddresses, error)
 	GetDefaultFrozen() (defaultFrozen map[uint64]bool, err error)
 
 	// YieldTxns returns a channel that produces the whole transaction stream starting at the specified round
 	YieldTxns(ctx context.Context, firstRound uint64) <-chan TxnRow
 
-	CommitRoundAccounting(updates RoundUpdates, round uint64, blockHeader *types.BlockHeader) (err error)
+	CommitRoundAccounting(updates RoundUpdates, round uint64, blockHeader *bookkeeping.BlockHeader) (err error)
 
-	GetBlock(ctx context.Context, round uint64, options GetBlockOptions) (blockHeader types.BlockHeader, transactions []TxnRow, err error)
+	GetBlock(ctx context.Context, round uint64, options GetBlockOptions) (blockHeader bookkeeping.BlockHeader, transactions []TxnRow, err error)
 
 	// The next multiple functions return a channel with results as well as the latest round
 	// accounted.
@@ -218,7 +219,7 @@ type AssetsQuery struct {
 type AssetRow struct {
 	AssetID      uint64
 	Creator      []byte
-	Params       sdk_types.AssetParams
+	Params       basics.AssetParams
 	Error        error
 	CreatedRound *uint64
 	ClosedRound  *uint64
@@ -277,8 +278,8 @@ type AssetUpdate struct {
 // AcfgUpdate is used by the accounting and IndexerDb implementations to share modifications in a block.
 type AcfgUpdate struct {
 	IsNew   bool
-	Creator types.Address
-	Params  types.AssetParams
+	Creator basics.Address
+	Params  basics.AssetParams
 }
 
 // AssetTransfer is used by the accounting and IndexerDb implementations to share modifications in a block.
@@ -293,8 +294,8 @@ type FreezeUpdate struct {
 
 // AssetClose is used by the accounting and IndexerDb implementations to share modifications in a block.
 type AssetClose struct {
-	CloseTo types.Address
-	Sender  types.Address
+	CloseTo basics.Address
+	Sender  basics.Address
 	Round   uint64
 	Offset  uint64
 }
@@ -371,14 +372,14 @@ type AppDelta struct {
 	Address      []byte
 	AddrIndex    uint64 // 0=Sender, otherwise stxn.Txn.Accounts[i-1]
 	Creator      []byte
-	Delta        types.StateDelta
-	OnCompletion sdk_types.OnCompletion
+	Delta        basics.StateDelta
+	OnCompletion transactions.OnCompletion
 
 	// AppParams settings coppied from Txn, only for AppGlobalDeltas
 	ApprovalProgram   []byte                `codec:"approv"`
 	ClearStateProgram []byte                `codec:"clearp"`
-	LocalStateSchema  sdk_types.StateSchema `codec:"lsch"`
-	GlobalStateSchema sdk_types.StateSchema `codec:"gsch"`
+	LocalStateSchema  basics.StateSchema `codec:"lsch"`
+	GlobalStateSchema basics.StateSchema `codec:"gsch"`
 	ExtraProgramPages uint32                `codec:"epp"`
 }
 
@@ -419,22 +420,22 @@ func (ad AppDelta) String() string {
 // StateDelta used by the accounting and IndexerDb implementations to share modifications in a block.
 type StateDelta struct {
 	Key   []byte
-	Delta types.ValueDelta
+	Delta basics.ValueDelta
 }
 
 // AppReverseDelta extra data attached to transactions relating to applications
 type AppReverseDelta struct {
 	Delta             []StateDelta           `codec:"d,omitempty"`
-	OnCompletion      sdk_types.OnCompletion `codec:"oc,omitempty"`
+	OnCompletion      transactions.OnCompletion `codec:"oc,omitempty"`
 	ApprovalProgram   []byte                 `codec:"approv,omitempty"`
 	ClearStateProgram []byte                 `codec:"clearp,omitempty"`
-	LocalStateSchema  sdk_types.StateSchema  `codec:"lsch,omitempty"`
-	GlobalStateSchema sdk_types.StateSchema  `codec:"gsch,omitempty"`
+	LocalStateSchema  basics.StateSchema  `codec:"lsch,omitempty"`
+	GlobalStateSchema basics.StateSchema  `codec:"gsch,omitempty"`
 	ExtraProgramPages uint32                 `codec:"epp,omitempty"`
 }
 
 // SetDelta adds delta values to the AppReverseDelta object.
-func (ard *AppReverseDelta) SetDelta(key []byte, delta types.ValueDelta) {
+func (ard *AppReverseDelta) SetDelta(key []byte, delta basics.ValueDelta) {
 	for i, sd := range ard.Delta {
 		if bytes.Equal(key, sd.Key) {
 			ard.Delta[i].Delta = delta
@@ -457,13 +458,6 @@ type Health struct {
 	DBAvailable bool                    `json:"db-available"`
 	Error       string                  `json:"error"`
 }
-
-// SpecialAccounts are the accounts which have special accounting rules.
-type SpecialAccounts struct {
-	FeeSink     types.Address
-	RewardsPool types.Address
-}
-
 // UpdateFilter is used by some functions to filter how an update is done.
 type UpdateFilter struct {
 	// StartRound only include transactions confirmed at this round or later.
@@ -476,5 +470,5 @@ type UpdateFilter struct {
 	MaxRound uint64
 
 	// Address only process transactions which modify this account.
-	Address *types.Address
+	Address *basics.Address
 }
